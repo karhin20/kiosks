@@ -1,0 +1,251 @@
+from fastapi import APIRouter, Depends, HTTPException, Query
+from supabase import Client
+
+from ..schemas.vendor import VendorCreate, VendorOut, VendorUpdate
+from ..schemas.product import ProductOut
+from ..dependencies import (
+    get_current_user,
+    require_super_admin,
+    require_vendor_admin,
+    require_vendor_ownership,
+)
+from ..supabase_client import get_supabase_client
+
+router = APIRouter(prefix="/vendors", tags=["vendors"])
+
+
+@router.get("/", response_model=list[VendorOut])
+def list_vendors(
+    active_only: bool = Query(True, description="Filter to only active vendors"),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """List all vendors. By default shows only active vendors."""
+    query = supabase.table("vendors").select("*").order("created_at", desc=True)
+    
+    if active_only:
+        query = query.eq("is_active", True)
+    
+    response = query.execute()
+    return response.data or []
+
+
+@router.get("/me", response_model=VendorOut | None)
+def get_my_vendor(
+    user=Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """Get the vendor associated with the current vendor_admin user."""
+    # Super admins don't have a specific vendor
+    if user.get("role") in ["admin", "super_admin"]:
+        return None
+    
+    # Get vendor for vendor_admin
+    if user.get("role") == "vendor_admin":
+        vendor_admin_response = (
+            supabase.table("vendor_admins")
+            .select("vendor_id")
+            .eq("user_id", user["id"])
+            .limit(1)
+            .execute()
+        )
+        
+        if vendor_admin_response.data and len(vendor_admin_response.data) > 0:
+            vendor_id = vendor_admin_response.data[0]["vendor_id"]
+            vendor_response = supabase.table("vendors").select("*").eq("id", vendor_id).single().execute()
+            if vendor_response.data:
+                return vendor_response.data
+    
+    return None
+
+
+
+@router.get("/{vendor_identifier}", response_model=VendorOut)
+def get_vendor(vendor_identifier: str, supabase: Client = Depends(get_supabase_client)):
+    """Get a specific vendor by ID or slug."""
+    # Try to find by slug first (more user-friendly)
+    response = supabase.table("vendors").select("*").eq("slug", vendor_identifier).execute()
+    
+    # If not found by slug, try by ID (for backwards compatibility)
+    if not response.data or len(response.data) == 0:
+        response = supabase.table("vendors").select("*").eq("id", vendor_identifier).execute()
+    
+    if not response.data or len(response.data) == 0:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    
+    return response.data[0]
+
+
+@router.get("/{vendor_id}/products", response_model=list[ProductOut])
+def get_vendor_products(
+    vendor_id: str,
+    supabase: Client = Depends(get_supabase_client),
+):
+    """Get all products for a specific vendor."""
+    # First verify vendor exists
+    vendor_response = supabase.table("vendors").select("id").eq("id", vendor_id).single().execute()
+    if not vendor_response.data:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    
+    # Get products for this vendor
+    response = (
+        supabase.table("products")
+        .select("*")
+        .eq("vendor_id", vendor_id)
+        .order("created_at", desc=True)
+        .execute()
+    )
+    return response.data or []
+
+
+@router.post("/", response_model=VendorOut, dependencies=[Depends(require_super_admin)])
+def create_vendor(
+    payload: VendorCreate,
+    supabase: Client = Depends(get_supabase_client),
+):
+    """Create a new vendor. Only super admins can create vendors."""
+    vendor_data = payload.model_dump()
+    
+    response = supabase.table("vendors").insert(vendor_data).execute()
+    
+    if not response.data:
+        raise HTTPException(status_code=500, detail="Failed to create vendor")
+    
+    return response.data[0]
+
+
+@router.put("/{vendor_id}", response_model=VendorOut)
+def update_vendor(
+    vendor_id: str,
+    payload: VendorUpdate,
+    supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_vendor_ownership),
+):
+    """
+    Update a vendor. Super admins can update any vendor.
+    Vendor admins can only update their own vendor.
+    """
+    update_data = payload.model_dump(exclude_none=True)
+    
+    if not update_data:
+        raise HTTPException(status_code=400, detail="No fields to update")
+    
+    response = (
+        supabase.table("vendors")
+        .update(update_data)
+        .eq("id", vendor_id)
+        .execute()
+    )
+    
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    
+    return response.data[0]
+
+
+@router.delete("/{vendor_id}", dependencies=[Depends(require_super_admin)])
+def delete_vendor(vendor_id: str, supabase: Client = Depends(get_supabase_client)):
+    """
+    Deactivate a vendor (soft delete). Only super admins can deactivate vendors.
+    This sets is_active to false rather than deleting the record.
+    """
+    response = (
+        supabase.table("vendors")
+        .update({"is_active": False})
+        .eq("id", vendor_id)
+        .execute()
+    )
+    
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    
+    return {"status": "deactivated", "id": vendor_id}
+
+
+@router.post("/{vendor_id}/admins", dependencies=[Depends(require_super_admin)])
+def assign_vendor_admin(
+    vendor_id: str,
+    user_id: str = Query(..., description="User ID to assign as vendor admin"),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """
+    Assign a user as admin for a vendor. Only super admins can assign vendor admins.
+    This also updates the user's role to vendor_admin if not already.
+    """
+    # Verify vendor exists
+    vendor_response = supabase.table("vendors").select("id").eq("id", vendor_id).single().execute()
+    if not vendor_response.data:
+        raise HTTPException(status_code=404, detail="Vendor not found")
+    
+    # Verify user exists
+    user_response = supabase.table("users").select("id, user_type").eq("id", user_id).single().execute()
+    if not user_response.data:
+        raise HTTPException(status_code=404, detail="User not found")
+    
+    # Update user role to vendor_admin if not already admin
+    if user_response.data["user_type"] not in ["admin", "super_admin", "vendor_admin"]:
+        supabase.table("users").update({"user_type": "vendor_admin"}).eq("id", user_id).execute()
+    
+    # Create vendor_admin relationship
+    try:
+        response = supabase.table("vendor_admins").insert({
+            "vendor_id": vendor_id,
+            "user_id": user_id,
+        }).execute()
+        
+        return {"status": "assigned", "vendor_id": vendor_id, "user_id": user_id}
+    except Exception as exc:
+        # Check if already assigned
+        if "duplicate key" in str(exc).lower():
+            raise HTTPException(status_code=400, detail="User is already admin of this vendor")
+        raise HTTPException(status_code=500, detail="Failed to assign vendor admin") from exc
+
+
+@router.delete("/{vendor_id}/admins/{user_id}", dependencies=[Depends(require_super_admin)])
+def remove_vendor_admin(
+    vendor_id: str,
+    user_id: str,
+    supabase: Client = Depends(get_supabase_client),
+):
+    """Remove a user from being admin of a vendor. Only super admins can remove vendor admins."""
+    response = (
+        supabase.table("vendor_admins")
+        .delete()
+        .eq("vendor_id", vendor_id)
+        .eq("user_id", user_id)
+        .execute()
+    )
+    
+    return {"status": "removed", "vendor_id": vendor_id, "user_id": user_id}
+
+
+@router.get("/{vendor_id}/admins")
+def list_vendor_admins(
+    vendor_id: str,
+    supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_vendor_ownership),
+):
+    """
+    List all admins for a vendor. Super admins can view any vendor's admins.
+    Vendor admins can only view admins of their own vendor.
+    """
+    # Get vendor_admin relationships
+    response = (
+        supabase.table("vendor_admins")
+        .select("user_id, created_at")
+        .eq("vendor_id", vendor_id)
+        .execute()
+    )
+    
+    if not response.data:
+        return []
+    
+    # Get user details for each admin
+    user_ids = [item["user_id"] for item in response.data]
+    users_response = (
+        supabase.table("users")
+        .select("id, email, full_name, user_type")
+        .in_("id", user_ids)
+        .execute()
+    )
+    
+    return users_response.data or []
