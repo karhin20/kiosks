@@ -10,8 +10,24 @@ from ..supabase_client import get_supabase_client
 router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(require_admin)])
 
 
+# Simple in-memory cache for admin summary
+_summary_cache = {
+    "data": None,
+    "timestamp": None
+}
+CACHE_TTL_SECONDS = 60
+
 @router.get("/summary", response_model=AdminSummary)
 def get_admin_summary(supabase: Client = Depends(get_supabase_client)):
+    # Check cache
+    now = datetime.utcnow()
+    if (
+        _summary_cache["data"] is not None and 
+        _summary_cache["timestamp"] is not None and 
+        (now - _summary_cache["timestamp"]).total_seconds() < CACHE_TTL_SECONDS
+    ):
+        return _summary_cache["data"]
+
     # Fetch orders
     orders_response = supabase.table("orders").select("*").order("created_at", desc=True).execute()
     orders = orders_response.data or []
@@ -59,7 +75,7 @@ def get_admin_summary(supabase: Client = Depends(get_supabase_client)):
 
     recent_orders = orders[:5]
 
-    return AdminSummary(
+    result = AdminSummary(
         total_revenue=total_revenue,
         total_orders=total_orders,
         total_customers=total_customers,
@@ -67,6 +83,12 @@ def get_admin_summary(supabase: Client = Depends(get_supabase_client)):
         recent_orders=recent_orders,
         vendor_stats=vendor_stats
     )
+
+    # Update cache
+    _summary_cache["data"] = result
+    _summary_cache["timestamp"] = datetime.utcnow()
+
+    return result
 
 
 @router.get("/customers", response_model=list[AdminCustomer])
