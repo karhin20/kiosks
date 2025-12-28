@@ -31,21 +31,25 @@ def list_products(
     return response.data or []
 
 
-@router.get("/flash-sales", response_model=list[ProductOut])
+    supabase.table("products").delete().eq("id", product_id).execute()
+    return {"status": "deleted", "id": product_id}
+
+
+@router.get("/flash-sales")
 def get_flash_sales(supabase: Client = Depends(get_supabase_client)):
     """Get products marked as flash sale items"""
     response = supabase.table("products").select("*").eq("is_flash_sale", True).order("created_at", desc=True).execute()
     return response.data or []
 
 
-@router.get("/best-selling", response_model=list[ProductOut])
+@router.get("/best-selling")
 def get_best_selling(supabase: Client = Depends(get_supabase_client)):
     """Get best selling products sorted by sales count"""
     response = supabase.table("products").select("*").order("sales_count", desc=True).limit(8).execute()
     return response.data or []
 
 
-@router.get("/new-arrivals", response_model=list[ProductOut])
+@router.get("/new-arrivals")
 def get_new_arrivals(supabase: Client = Depends(get_supabase_client)):
     """Get featured products or recent arrivals"""
     # First try to get featured products
@@ -57,7 +61,32 @@ def get_new_arrivals(supabase: Client = Depends(get_supabase_client)):
     return response.data or []
 
 
-@router.get("/{product_id}", response_model=ProductOut)
+@router.delete("/storage/image")
+async def delete_storage_image(
+    file_path: str = Query(..., description="The object key/path in Supabase storage"),
+    supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_vendor_admin),
+):
+    """
+    Delete an image from the storage bucket.
+    Restricted to admins and vendor admins.
+    """
+    settings = get_settings()
+    
+    # Basic path safety check
+    if not file_path.startswith("products/"):
+        raise HTTPException(status_code=400, detail="Access denied to this storage path")
+
+    try:
+        storage = supabase.storage.from_(settings.SUPABASE_STORAGE_BUCKET)
+        # Note: .remove() expects a list of paths
+        response = storage.remove([file_path])
+        return {"status": "success", "data": response}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete image: {str(exc)}")
+
+
+@router.get("/{product_id}")
 def get_product(product_id: str, supabase: Client = Depends(get_supabase_client)):
     response = supabase.table("products").select("*").eq("id", product_id).single().execute()
     if not response.data:
@@ -193,4 +222,6 @@ async def upload_product_image(
     # supabase.table("products").update({"image_url": public_url}).eq("id", product_id).execute()
     
     return {"image_url": public_url}
+
+
 

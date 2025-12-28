@@ -20,5 +20,22 @@ class Settings(BaseSettings):
 
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    settings = Settings()
+    # If ALLOWED_ORIGINS is a string, it might be a JSON list or comma-separated
+    if isinstance(settings.ALLOWED_ORIGINS, str):
+        import json
+        raw = settings.ALLOWED_ORIGINS.strip()
+        if raw.startswith("[") and raw.endsWith("]"):
+            try:
+                settings.ALLOWED_ORIGINS = json.loads(raw)
+            except Exception:
+                settings.ALLOWED_ORIGINS = [s.strip() for s in raw[1:-1].split(",") if s.strip()]
+        else:
+            settings.ALLOWED_ORIGINS = [s.strip() for s in raw.split(",") if s.strip()]
+    
+    # Ensure all origins are strings and stripped
+    if isinstance(settings.ALLOWED_ORIGINS, list):
+        settings.ALLOWED_ORIGINS = [str(o).strip() for o in settings.ALLOWED_ORIGINS if o]
+        
+    return settings
 
