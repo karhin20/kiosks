@@ -12,15 +12,50 @@ router = APIRouter(prefix="/admin", tags=["admin"], dependencies=[Depends(requir
 
 @router.get("/summary", response_model=AdminSummary)
 def get_admin_summary(supabase: Client = Depends(get_supabase_client)):
+    # Fetch orders
     orders_response = supabase.table("orders").select("*").order("created_at", desc=True).execute()
     orders = orders_response.data or []
+
+    # Fetch all products to map product_id -> vendor_id
+    products_resp = supabase.table("products").select("id, name, vendor_id").execute()
+    products_data = products_resp.data or []
+    product_to_vendor = {p["id"]: p.get("vendor_id") for p in products_data}
+    
+    # Fetch all vendors to map vendor_id -> vendor_name
+    vendors_resp = supabase.table("vendors").select("id, name").execute()
+    vendors_data = vendors_resp.data or []
+    vendor_names = {v["id"]: v["name"] for v in vendors_data}
 
     total_revenue = sum(order.get("total", 0) for order in orders)
     total_orders = len(orders)
     total_customers = len({order.get("user_id") for order in orders if order.get("user_id")})
+    total_products = len(products_data)
 
-    products_resp = supabase.table("products").select("id").execute()
-    total_products = len(products_resp.data or [])
+    # Calculate vendor stats
+    vendor_stats_map = defaultdict(lambda: {"revenue": 0.0, "sales": 0})
+    
+    for order in orders:
+        items = order.get("items", [])
+        for item in items:
+            p_id = item.get("product_id")
+            v_id = product_to_vendor.get(p_id)
+            if v_id:
+                qty = item.get("quantity", 0)
+                price = item.get("price", 0)
+                vendor_stats_map[v_id]["revenue"] += float(qty * price)
+                vendor_stats_map[v_id]["sales"] += qty
+
+    vendor_stats = []
+    for v_id, stats in vendor_stats_map.items():
+        vendor_stats.append({
+            "vendor_id": v_id,
+            "vendor_name": vendor_names.get(v_id, "Unknown Vendor"),
+            "total_revenue": stats["revenue"],
+            "total_sales": stats["sales"]
+        })
+
+    # Sort vendor stats by revenue descending
+    vendor_stats.sort(key=lambda x: x["total_revenue"], reverse=True)
 
     recent_orders = orders[:5]
 
@@ -30,6 +65,7 @@ def get_admin_summary(supabase: Client = Depends(get_supabase_client)):
         total_customers=total_customers,
         total_products=total_products,
         recent_orders=recent_orders,
+        vendor_stats=vendor_stats
     )
 
 
