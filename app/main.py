@@ -7,7 +7,7 @@ from .routers import products, orders, admin, auth, vendors
 
 def create_app() -> FastAPI:
     settings = get_settings()
-    app = FastAPI(title=settings.APP_NAME, redirect_slashes=False)
+    app = FastAPI(title=settings.APP_NAME, redirect_slashes=True)
 
     app.add_middleware(
         CORSMiddleware,
