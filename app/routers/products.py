@@ -16,7 +16,7 @@ from ..config import get_settings
 router = APIRouter(prefix="/products", tags=["products"])
 
 
-@router.get("/", response_model=list[ProductOut])
+@router.get("", response_model=list[ProductOut])
 def list_products(
     vendor_id: str | None = Query(None, description="Filter products by vendor ID"),
     supabase: Client = Depends(get_supabase_client),
@@ -29,10 +29,6 @@ def list_products(
     
     response = query.execute()
     return response.data or []
-
-
-    supabase.table("products").delete().eq("id", product_id).execute()
-    return {"status": "deleted", "id": product_id}
 
 
 @router.get("/flash-sales")
@@ -94,7 +90,7 @@ def get_product(product_id: str, supabase: Client = Depends(get_supabase_client)
     return response.data
 
 
-@router.post("/", response_model=ProductOut)
+@router.post("", response_model=ProductOut)
 def create_product(
     payload: ProductCreate,
     supabase: Client = Depends(get_supabase_client),

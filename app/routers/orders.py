@@ -9,7 +9,7 @@ from ..supabase_client import get_supabase_client
 router = APIRouter(prefix="/orders", tags=["orders"])
 
 
-@router.get("/", response_model=list[OrderOut])
+@router.get("", response_model=list[OrderOut])
 def list_orders(user=Depends(get_current_user), supabase: Client = Depends(get_supabase_client)):
     response = (
         supabase.table("orders")
@@ -21,7 +21,7 @@ def list_orders(user=Depends(get_current_user), supabase: Client = Depends(get_s
     return response.data or []
 
 
-@router.post("/", response_model=OrderOut)
+@router.post("", response_model=OrderOut)
 def create_order(
     payload: OrderCreate,
     user=Depends(get_current_user),
@@ -36,10 +36,21 @@ def create_order(
         "total": payload.total,
         "items": [item.model_dump() for item in payload.items],
         "shipping": payload.shipping.model_dump(),
-        "created_at": datetime.utcnow().isoformat(),
+        "created_at": datetime.now().isoformat(),
     }
-    response = supabase.table("orders").insert(order_payload).select("*").single().execute()
-    return response.data
+    
+    try:
+        response = supabase.table("orders").insert(order_payload).select("*").single().execute()
+        if not response.data:
+            raise HTTPException(status_code=500, detail="Failed to create order in database")
+        return response.data
+    except Exception as exc:
+        # Log the error (could use a logger here, but using print for now to help the user if they see logs)
+        print(f"ERROR creating order: {exc}")
+        raise HTTPException(
+            status_code=500, 
+            detail=f"Error placing order: {str(exc)}"
+        ) from exc
 
 
 @router.get("/admin/all", response_model=list[OrderOut], dependencies=[Depends(require_admin)])

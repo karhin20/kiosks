@@ -14,7 +14,7 @@ from ..supabase_client import get_supabase_client
 router = APIRouter(prefix="/vendors", tags=["vendors"])
 
 
-@router.get("/", response_model=list[VendorOut])
+@router.get("", response_model=list[VendorOut])
 def list_vendors(
     active_only: bool = Query(True, description="Filter to only active vendors"),
     supabase: Client = Depends(get_supabase_client),
@@ -97,7 +97,7 @@ def get_vendor_products(
     return response.data or []
 
 
-@router.post("/", response_model=VendorOut, dependencies=[Depends(require_super_admin)])
+@router.post("", response_model=VendorOut, dependencies=[Depends(require_super_admin)])
 def create_vendor(
     payload: VendorCreate,
     supabase: Client = Depends(get_supabase_client),
