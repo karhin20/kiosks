@@ -93,60 +93,40 @@ def get_admin_summary(supabase: Client = Depends(get_supabase_client)):
 
 @router.get("/customers", response_model=list[AdminCustomer])
 def get_admin_customers(supabase: Client = Depends(get_supabase_client)):
-    orders_response = supabase.table("orders").select("*").execute()
+    # Fetch all users who are customers
+    users_response = supabase.table("users").select("*").eq("user_type", "customer").execute()
+    users = users_response.data or []
+
+    # Fetch all orders to calculate stats
+    orders_response = supabase.table("orders").select("user_id, total").execute()
     orders = orders_response.data or []
 
-    grouped: dict[str | None, dict] = defaultdict(
-        lambda: {
-            "user_id": None,
-            "name": "",
-            "phone": None,
-            "email": None,
-            "orders": 0,
-            "total_spent": 0.0,
-            "joined_at": None,
-        }
-    )
-
+    # Calculate stats per user
+    user_stats = defaultdict(lambda: {"orders": 0, "total_spent": 0.0})
     for order in orders:
-        user_id = order.get("user_id")
-        shipping = order.get("shipping") or {}
-        created_at_str = order.get("created_at")
-        created_at = (
-            datetime.fromisoformat(created_at_str.replace("Z", ""))
-            if isinstance(created_at_str, str)
-            else datetime.utcnow()
-        )
-
-        g = grouped[user_id]
-        g["user_id"] = user_id
-        # Prefer existing non-empty name/phone
-        if not g["name"] and shipping.get("name"):
-            g["name"] = shipping.get("name")
-        if not g["phone"] and shipping.get("phone"):
-            g["phone"] = shipping.get("phone")
-        g["orders"] += 1
-        g["total_spent"] += float(order.get("total") or 0)
-        if g["joined_at"] is None or created_at < g["joined_at"]:
-            g["joined_at"] = created_at
+        u_id = order.get("user_id")
+        if u_id:
+            user_stats[u_id]["orders"] += 1
+            user_stats[u_id]["total_spent"] += float(order.get("total") or 0)
 
     customers: list[AdminCustomer] = []
-    for g in grouped.values():
-        if not g["name"]:
-            g["name"] = "Unknown"
+    for user in users:
+        u_id = user["id"]
+        stats = user_stats[u_id]
+        
         customers.append(
             AdminCustomer(
-                user_id=g["user_id"],
-                name=g["name"],
-                phone=g["phone"],
-                email=g["email"],
-                orders=g["orders"],
-                total_spent=g["total_spent"],
-                joined_at=g["joined_at"] or datetime.utcnow(),
+                user_id=u_id,
+                name=user.get("full_name") or "Unknown",
+                phone=user.get("phone"),
+                email=user.get("email"),
+                orders=stats["orders"],
+                total_spent=stats["total_spent"],
+                joined_at=user.get("created_at") or datetime.utcnow(),
             )
         )
 
-    # Sort by joined_at ascending like "joinedAt"
-    customers.sort(key=lambda c: c.joined_at)
+    # Sort by joined_at descending (newest first)
+    customers.sort(key=lambda c: c.joined_at, reverse=True)
     return customers
 
