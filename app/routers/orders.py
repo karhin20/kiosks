@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
 from supabase import Client
 
@@ -36,20 +36,29 @@ def create_order(
         "total": payload.total,
         "items": [item.model_dump() for item in payload.items],
         "shipping": payload.shipping.model_dump(),
-        "created_at": datetime.now().isoformat(),
+        # Removing created_at to let the database handle it with its default
     }
     
     try:
-        response = supabase.table("orders").insert(order_payload).select("*").single().execute()
-        if not response.data:
-            raise HTTPException(status_code=500, detail="Failed to create order in database")
-        return response.data
+        # Use upsert or insert? Insert is better for new orders.
+        # select("*") ensures we get all fields back including auto-generated ID and created_at
+        response = supabase.table("orders").insert(order_payload).execute()
+        
+        if not response.data or len(response.data) == 0:
+            print(f"DEBUG: Insert failed? Response: {response}")
+            raise HTTPException(status_code=500, detail="Failed to create order record")
+            
+        return response.data[0]
     except Exception as exc:
-        # Log the error (could use a logger here, but using print for now to help the user if they see logs)
-        print(f"ERROR creating order: {exc}")
+        print(f"CRITICAL ERROR creating order: {type(exc).__name__}: {exc}")
+        # Try to provide more detail in the exception if possible
+        error_msg = str(exc)
+        if "id" in error_msg.lower() and "already exists" in error_msg.lower():
+            raise HTTPException(status_code=400, detail="Order already exists")
+            
         raise HTTPException(
             status_code=500, 
-            detail=f"Error placing order: {str(exc)}"
+            detail=f"Internal Server Error: {error_msg}"
         ) from exc
 
 
