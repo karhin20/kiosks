@@ -69,4 +69,5 @@ ALTER TABLE public.products
 ADD COLUMN IF NOT EXISTS is_flash_sale boolean DEFAULT false,
 ADD COLUMN IF NOT EXISTS sales_count integer DEFAULT 0,
 ADD COLUMN IF NOT EXISTS is_featured boolean DEFAULT false,
+ADD COLUMN IF NOT EXISTS video_url text,
 ADD COLUMN IF NOT EXISTS created_at timestamp with time zone DEFAULT timezone('utc'::text, now());

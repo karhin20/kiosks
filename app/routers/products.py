@@ -120,6 +120,7 @@ def create_product(
         "is_flash_sale": payload.is_flash_sale if hasattr(payload, 'is_flash_sale') else False,
         "sales_count": payload.sales_count if hasattr(payload, 'sales_count') else 0,
         "is_featured": payload.is_featured if hasattr(payload, 'is_featured') else False,
+        "video_url": payload.video_url,
         "vendor_id": vendor_id,  # Assign to vendor
     }
     response = (

@@ -15,6 +15,7 @@ class ProductBase(BaseModel):
     is_flash_sale: bool = False
     sales_count: int = Field(0, ge=0)
     is_featured: bool = False
+    video_url: Optional[str] = None
 
 
 class ProductCreate(ProductBase):
@@ -34,6 +35,7 @@ class ProductUpdate(BaseModel):
     is_flash_sale: Optional[bool] = None
     sales_count: Optional[int] = Field(None, ge=0)
     is_featured: Optional[bool] = None
+    video_url: Optional[str] = None
 
 
 class ProductOut(ProductBase):
@@ -43,6 +45,7 @@ class ProductOut(ProductBase):
     is_flash_sale: bool = False
     sales_count: int = 0
     is_featured: bool = False
+    video_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
