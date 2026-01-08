@@ -45,6 +45,8 @@ class ProductOut(ProductBase):
     is_flash_sale: bool = False
     sales_count: int = 0
     is_featured: bool = False
+    rating: float = 0.0
+    reviews_count: int = 0
     video_url: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None

@@ -22,10 +22,10 @@ def get_current_user(
         auth_client = supabase.auth
         user_response = auth_client.get_user(token)
     except Exception as exc:  # pragma: no cover - passthrough
-        raise HTTPException(status_code=401, detail="Invalid or expired token") from exc
+        raise HTTPException(status_code=401, detail="Session expired. Please sign in again.") from exc
 
     if not user_response or not user_response.user:
-        raise HTTPException(status_code=401, detail="Invalid or expired token")
+        raise HTTPException(status_code=401, detail="Session expired. Please sign in again.")
 
     supa_user = user_response.user
     
