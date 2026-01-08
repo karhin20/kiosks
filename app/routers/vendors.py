@@ -75,16 +75,22 @@ def get_vendor(vendor_identifier: str, supabase: Client = Depends(get_supabase_c
     return response.data[0]
 
 
-@router.get("/{vendor_id}/products", response_model=list[ProductOut])
+@router.get("/{vendor_identifier}/products", response_model=list[ProductOut])
 def get_vendor_products(
-    vendor_id: str,
+    vendor_identifier: str,
     supabase: Client = Depends(get_supabase_client),
 ):
-    """Get all products for a specific vendor."""
-    # First verify vendor exists
-    vendor_response = supabase.table("vendors").select("id").eq("id", vendor_id).single().execute()
-    if not vendor_response.data:
+    """Get all products for a specific vendor by ID or slug."""
+    # Try to find vendor by slug first, then by ID
+    vendor_response = supabase.table("vendors").select("id").eq("slug", vendor_identifier).execute()
+    
+    if not vendor_response.data or len(vendor_response.data) == 0:
+        vendor_response = supabase.table("vendors").select("id").eq("id", vendor_identifier).execute()
+    
+    if not vendor_response.data or len(vendor_response.data) == 0:
         raise HTTPException(status_code=404, detail="Vendor not found")
+    
+    vendor_id = vendor_response.data[0]["id"]
     
     # Get products for this vendor
     response = (
