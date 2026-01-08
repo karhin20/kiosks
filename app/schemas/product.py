@@ -48,6 +48,8 @@ class ProductOut(ProductBase):
     rating: float = 0.0
     reviews_count: int = 0
     video_url: Optional[str] = None
+    vendor_name: Optional[str] = None
+    vendor_slug: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 

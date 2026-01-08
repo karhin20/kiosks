@@ -22,39 +22,79 @@ def list_products(
     supabase: Client = Depends(get_supabase_client),
 ):
     """List all products. Optionally filter by vendor_id."""
-    query = supabase.table("products").select("*").order("created_at", desc=True)
+    query = supabase.table("products").select("*, vendors(name, slug)").order("created_at", desc=True)
     
     if vendor_id:
         query = query.eq("vendor_id", vendor_id)
     
     response = query.execute()
-    return response.data or []
+    data = response.data or []
+    
+    # Flatten vendor data
+    for item in data:
+        if item.get("vendors"):
+            item["vendor_name"] = item["vendors"].get("name")
+            item["vendor_slug"] = item["vendors"].get("slug")
+            
+    return data
 
 
 @router.get("/flash-sales")
 def get_flash_sales(supabase: Client = Depends(get_supabase_client)):
     """Get products marked as flash sale items"""
-    response = supabase.table("products").select("*").eq("is_flash_sale", True).order("created_at", desc=True).execute()
-    return response.data or []
+    response = supabase.table("products").select("*, vendors(name, slug)").eq("is_flash_sale", True).order("created_at", desc=True).execute()
+    data = response.data or []
+    
+    # Flatten vendor data
+    for item in data:
+        if item.get("vendors"):
+            item["vendor_name"] = item["vendors"].get("name")
+            item["vendor_slug"] = item["vendors"].get("slug")
+            
+    return data
 
 
 @router.get("/best-selling")
 def get_best_selling(supabase: Client = Depends(get_supabase_client)):
     """Get best selling products sorted by sales count"""
-    response = supabase.table("products").select("*").order("sales_count", desc=True).limit(8).execute()
-    return response.data or []
+    response = supabase.table("products").select("*, vendors(name, slug)").order("sales_count", desc=True).limit(8).execute()
+    data = response.data or []
+    
+    # Flatten vendor data
+    for item in data:
+        if item.get("vendors"):
+            item["vendor_name"] = item["vendors"].get("name")
+            item["vendor_slug"] = item["vendors"].get("slug")
+            
+    return data
 
 
 @router.get("/new-arrivals")
 def get_new_arrivals(supabase: Client = Depends(get_supabase_client)):
     """Get featured products or recent arrivals"""
     # First try to get featured products
-    response = supabase.table("products").select("*").eq("is_featured", True).order("created_at", desc=True).limit(4).execute()
-    if response.data and len(response.data) > 0:
-        return response.data
+    response = supabase.table("products").select("*, vendors(name, slug)").eq("is_featured", True).order("created_at", desc=True).limit(4).execute()
+    
+    data = response.data or []
+    if len(data) > 0:
+        # Flatten vendor data
+        for item in data:
+            if item.get("vendors"):
+                item["vendor_name"] = item["vendors"].get("name")
+                item["vendor_slug"] = item["vendors"].get("slug")
+        return data
+
     # Fallback to newest products
-    response = supabase.table("products").select("*").order("created_at", desc=True).limit(4).execute()
-    return response.data or []
+    response = supabase.table("products").select("*, vendors(name, slug)").order("created_at", desc=True).limit(4).execute()
+    data = response.data or []
+    
+    # Flatten vendor data
+    for item in data:
+        if item.get("vendors"):
+            item["vendor_name"] = item["vendors"].get("name")
+            item["vendor_slug"] = item["vendors"].get("slug")
+            
+    return data
 
 
 @router.delete("/storage/image")
@@ -84,10 +124,16 @@ async def delete_storage_image(
 
 @router.get("/{product_id}")
 def get_product(product_id: str, supabase: Client = Depends(get_supabase_client)):
-    response = supabase.table("products").select("*").eq("id", product_id).single().execute()
+    response = supabase.table("products").select("*, vendors(name, slug)").eq("id", product_id).single().execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Product not found")
-    return response.data
+        
+    data = response.data
+    if data.get("vendors"):
+        data["vendor_name"] = data["vendors"].get("name")
+        data["vendor_slug"] = data["vendors"].get("slug")
+        
+    return data
 
 
 @router.post("", response_model=ProductOut)

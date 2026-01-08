@@ -205,3 +205,62 @@ def toggle_favorite(
     
     return current_favorites
 
+
+@router.get("/google-url")
+def get_google_auth_url(supabase: Client = Depends(get_supabase_anon_client)):
+    """
+    Returns the Google OAuth URL for signing in.
+    Redirects back to the frontend application after successful login.
+    """
+    try:
+        # Construct the redirect URL to the frontend (adjust port/domain as needed)
+        # In production this should be your production URL
+        redirect_to = "http://localhost:8080/auth/callback" 
+        
+        res = supabase.auth.get_url_for_provider(
+            provider="google",
+            redirect_to=redirect_to,
+            scopes=["email", "profile"]
+        )
+        return {"url": res}
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+class RefreshTokenPayload(BaseModel):
+    refresh_token: str
+
+
+@router.post("/refresh", response_model=AuthResponse)
+def refresh_token(payload: RefreshTokenPayload, supabase: Client = Depends(get_supabase_anon_client)):
+    """
+    Refreshes the access token using the refresh token.
+    """
+    try:
+        res = supabase.auth.refresh_session(payload.refresh_token)
+        
+        if not res.session or not res.user:
+            raise HTTPException(status_code=401, detail="Invalid refresh token")
+
+        # Fetch detailed profile from users table
+        user_data = res.user.model_dump()
+        try:
+            profile_res = supabase.table("users").select("*").eq("id", res.user.id).single().execute()
+            if profile_res.data:
+                profile = profile_res.data
+                user_data["role"] = profile.get("user_type", "customer")
+                user_data["name"] = profile.get("full_name") or user_data.get("user_metadata", {}).get("name")
+                user_data["phone"] = profile.get("phone") or user_data.get("phone")
+                user_data["favorites"] = profile.get("favorites", [])
+                user_data["address"] = profile.get("address")
+        except Exception:
+            pass
+
+        return {
+            "access_token": res.session.access_token,
+            "user": user_data,
+            # We might want to return the new refresh token too if it rotates
+        }
+    except Exception as e:
+        raise HTTPException(status_code=401, detail=str(e))
+
