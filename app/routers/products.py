@@ -16,6 +16,15 @@ from ..config import get_settings
 router = APIRouter(prefix="/products", tags=["products"])
 
 
+def _flatten_vendor_data(products: list[dict]) -> list[dict]:
+    """Extract vendor name and slug from nested vendors object."""
+    for item in products:
+        if item.get("vendors"):
+            item["vendor_name"] = item["vendors"].get("name")
+            item["vendor_slug"] = item["vendors"].get("slug")
+    return products
+
+
 @router.get("", response_model=list[ProductOut])
 def list_products(
     vendor_id: str | None = Query(None, description="Filter products by vendor ID"),
@@ -29,44 +38,21 @@ def list_products(
     
     response = query.execute()
     data = response.data or []
-    
-    # Flatten vendor data
-    for item in data:
-        if item.get("vendors"):
-            item["vendor_name"] = item["vendors"].get("name")
-            item["vendor_slug"] = item["vendors"].get("slug")
-            
-    return data
+    return _flatten_vendor_data(data)
 
 
 @router.get("/flash-sales")
 def get_flash_sales(supabase: Client = Depends(get_supabase_client)):
     """Get products marked as flash sale items"""
     response = supabase.table("products").select("*, vendors(name, slug)").eq("is_flash_sale", True).order("created_at", desc=True).execute()
-    data = response.data or []
-    
-    # Flatten vendor data
-    for item in data:
-        if item.get("vendors"):
-            item["vendor_name"] = item["vendors"].get("name")
-            item["vendor_slug"] = item["vendors"].get("slug")
-            
-    return data
+    return _flatten_vendor_data(response.data or [])
 
 
 @router.get("/best-selling")
 def get_best_selling(supabase: Client = Depends(get_supabase_client)):
     """Get best selling products sorted by sales count"""
     response = supabase.table("products").select("*, vendors(name, slug)").order("sales_count", desc=True).limit(8).execute()
-    data = response.data or []
-    
-    # Flatten vendor data
-    for item in data:
-        if item.get("vendors"):
-            item["vendor_name"] = item["vendors"].get("name")
-            item["vendor_slug"] = item["vendors"].get("slug")
-            
-    return data
+    return _flatten_vendor_data(response.data or [])
 
 
 @router.get("/new-arrivals")
@@ -77,24 +63,11 @@ def get_new_arrivals(supabase: Client = Depends(get_supabase_client)):
     
     data = response.data or []
     if len(data) > 0:
-        # Flatten vendor data
-        for item in data:
-            if item.get("vendors"):
-                item["vendor_name"] = item["vendors"].get("name")
-                item["vendor_slug"] = item["vendors"].get("slug")
-        return data
+        return _flatten_vendor_data(data)
 
     # Fallback to newest products
     response = supabase.table("products").select("*, vendors(name, slug)").order("created_at", desc=True).limit(4).execute()
-    data = response.data or []
-    
-    # Flatten vendor data
-    for item in data:
-        if item.get("vendors"):
-            item["vendor_name"] = item["vendors"].get("name")
-            item["vendor_slug"] = item["vendors"].get("slug")
-            
-    return data
+    return _flatten_vendor_data(response.data or [])
 
 
 @router.delete("/storage/image")
@@ -127,13 +100,7 @@ def get_product(product_id: str, supabase: Client = Depends(get_supabase_client)
     response = supabase.table("products").select("*, vendors(name, slug)").eq("id", product_id).single().execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Product not found")
-        
-    data = response.data
-    if data.get("vendors"):
-        data["vendor_name"] = data["vendors"].get("name")
-        data["vendor_slug"] = data["vendors"].get("slug")
-        
-    return data
+    return _flatten_vendor_data([response.data])[0]
 
 
 @router.post("", response_model=ProductOut)

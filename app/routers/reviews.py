@@ -1,7 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from typing import List
 from ..schemas.reviews import ReviewCreate, ReviewResponse
-from ..dependencies import get_current_user, get_supabase
+from ..dependencies import get_current_user
+from ..supabase_client import get_supabase_client
 from supabase import Client
 
 router = APIRouter(
@@ -10,7 +11,7 @@ router = APIRouter(
 )
 
 @router.get("/{product_id}", response_model=List[ReviewResponse])
-def get_product_reviews(product_id: str, supabase: Client = Depends(get_supabase)):
+def get_product_reviews(product_id: str, supabase: Client = Depends(get_supabase_client)):
     # Fetch reviews
     response = supabase.table("reviews").select("*").eq("product_id", product_id).order("created_at", desc=True).execute()
     
@@ -52,7 +53,7 @@ def get_product_reviews(product_id: str, supabase: Client = Depends(get_supabase
 def create_review(
     review: ReviewCreate, 
     current_user: dict = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    supabase: Client = Depends(get_supabase_client)
 ):
     user_id = current_user.get("sub") or current_user.get("id")
     
@@ -79,7 +80,7 @@ def create_review(
 def delete_review(
     review_id: str,
     current_user: dict = Depends(get_current_user),
-    supabase: Client = Depends(get_supabase)
+    supabase: Client = Depends(get_supabase_client)
 ):
     user_id = current_user.get("sub") or current_user.get("id")
     
