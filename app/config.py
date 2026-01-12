@@ -11,6 +11,8 @@ class Settings(BaseSettings):
     SUPABASE_SERVICE_ROLE_KEY: str
     SUPABASE_ANON_KEY: str | None = None
     SUPABASE_STORAGE_BUCKET: str = "product-images"
+    MESSENGER_URL: str = "http://localhost:4000/notify"
+    MESSENGER_SECRET: str = "lumi_secret_123"
     API_PREFIX: str = "/api"
     APP_NAME: str = "Lampo API"
     ALLOWED_ORIGINS: list[str] = ["*"]
