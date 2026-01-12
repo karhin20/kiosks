@@ -215,7 +215,7 @@ def get_google_auth_url(supabase: Client = Depends(get_supabase_anon_client)):
     try:
         # Construct the redirect URL to the frontend (adjust port/domain as needed)
         # In production this should be your production URL
-        redirect_to = "http://localhost:8080/auth/callback" 
+        redirect_to = "https://lumina-ladies.vercel.app/auth/callback" 
         
         res = supabase.auth.get_url_for_provider(
             provider="google",
