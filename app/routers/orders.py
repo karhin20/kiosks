@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Query
 import httpx
 from supabase import Client
 
@@ -82,22 +82,48 @@ def create_order(
     if not payload.items:
         raise HTTPException(status_code=400, detail="Order must contain at least one item")
 
+    # Best Practice: Recalculate total on server-side using current DB prices
+    # This prevents users from manipulating the price in the frontend
+    order_items = []
+    final_total = 0.0
+
+    # Fetch product IDs from payload
+    product_ids = [item.product_id for item in payload.items]
+    
+    # Query database for current prices
+    products_res = supabase.table("products").select("id, price, name, image_url").in_("id", product_ids).execute()
+    db_products = {p["id"]: p for p in products_res.data}
+
+    for item in payload.items:
+        if item.product_id not in db_products:
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Product not found: {item.product_id}"
+            )
+        
+        current_db_product = db_products[item.product_id]
+        db_price = current_db_product["price"]
+        item_total = db_price * item.quantity
+        final_total += item_total
+
+        # Use verified price from DB
+        item_dict = item.model_dump()
+        item_dict["price"] = db_price  # Overwrite with verified price
+        order_items.append(item_dict)
+
     order_payload = {
         "user_id": user["id"],
         "status": "pending",
-        "total": payload.total,
-        "items": [item.model_dump() for item in payload.items],
+        "total": final_total,
+        "items": order_items,
         "shipping": payload.shipping.model_dump(),
-        # Removing created_at to let the database handle it with its default
     }
     
     try:
-        # Use upsert or insert? Insert is better for new orders.
         # select("*") ensures we get all fields back including auto-generated ID and created_at
         response = supabase.table("orders").insert(order_payload).execute()
         
         if not response.data or len(response.data) == 0:
-            print(f"DEBUG: Insert failed? Response: {response}")
             raise HTTPException(status_code=500, detail="Failed to create order record")
             
         order_data = response.data[0]
@@ -107,7 +133,6 @@ def create_order(
         return order_data
     except Exception as exc:
         print(f"CRITICAL ERROR creating order: {type(exc).__name__}: {exc}")
-        # Try to provide more detail in the exception if possible
         error_msg = str(exc)
         if "id" in error_msg.lower() and "already exists" in error_msg.lower():
             raise HTTPException(status_code=400, detail="Order already exists")
@@ -119,8 +144,12 @@ def create_order(
 
 
 @router.get("/admin/all", response_model=list[OrderOut], dependencies=[Depends(require_admin)])
-def list_all_orders(supabase: Client = Depends(get_supabase_client)):
-    response = supabase.table("orders").select("*").order("created_at", desc=True).execute()
+def list_all_orders(
+    limit: int = Query(50, ge=1, le=200, description="Max orders to return"),
+    offset: int = Query(0, ge=0, description="Orders to skip"),
+    supabase: Client = Depends(get_supabase_client),
+):
+    response = supabase.table("orders").select("*").order("created_at", desc=True).range(offset, offset + limit - 1).execute()
     return response.data or []
 
 

@@ -65,8 +65,8 @@ def require_admin(user=Depends(get_current_user)):
 
 
 def require_super_admin(user=Depends(get_current_user)):
-    """Requires user to be super_admin"""
-    if user.get("role") not in ["admin", "super_admin"]:
+    """Requires user to be super_admin ONLY (highest privilege level)"""
+    if user.get("role") != "super_admin":
         raise HTTPException(status_code=403, detail="Super admin privileges required")
     return user
 

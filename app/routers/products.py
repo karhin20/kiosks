@@ -28,13 +28,18 @@ def _flatten_vendor_data(products: list[dict]) -> list[dict]:
 @router.get("", response_model=list[ProductOut])
 def list_products(
     vendor_id: str | None = Query(None, description="Filter products by vendor ID"),
+    limit: int = Query(50, ge=1, le=100, description="Max number of products to return"),
+    offset: int = Query(0, ge=0, description="Number of products to skip"),
     supabase: Client = Depends(get_supabase_client),
 ):
-    """List all products. Optionally filter by vendor_id."""
+    """List all products with pagination. Optionally filter by vendor_id."""
     query = supabase.table("products").select("*, vendors(name, slug)").order("created_at", desc=True)
     
     if vendor_id:
         query = query.eq("vendor_id", vendor_id)
+    
+    # Apply pagination
+    query = query.range(offset, offset + limit - 1)
     
     response = query.execute()
     data = response.data or []
@@ -75,16 +80,53 @@ async def delete_storage_image(
     file_path: str = Query(..., description="The object key/path in Supabase storage"),
     supabase: Client = Depends(get_supabase_client),
     user=Depends(require_vendor_admin),
+    vendor_id: str | None = Depends(get_vendor_for_user),
 ):
     """
     Delete an image from the storage bucket.
-    Restricted to admins and vendor admins.
+    Restricted to admins and vendor admins who own the product.
     """
     settings = get_settings()
     
-    # Basic path safety check
+    # 1. Basic path safety check
     if not file_path.startswith("products/"):
         raise HTTPException(status_code=400, detail="Access denied to this storage path")
+
+    # 2. Ownership Check for Vendor Admins
+    if user.get("role") == "vendor_admin":
+        if not vendor_id:
+            raise HTTPException(status_code=403, detail="Vendor admin must be assigned to a vendor")
+            
+        # Extract product_id from the filename (format: products/product_id-uuid.ext)
+        # This assumes the naming convention is strictly followed
+        try:
+            filename = file_path.split("/")[-1]
+            # Filename often looks like "product-slug-someuuid.jpg" 
+            # or we can check if any product owns this image URL
+            # Best approach: Query products table to see if any product owned by this vendor has this image
+            product_search = supabase.table("products").select("id").eq("vendor_id", vendor_id).contains("images", [file_path]).execute()
+            
+            # If not in 'images' array, check if it's the main 'image_url'
+            if not product_search.data:
+                product_search = supabase.table("products").select("id").eq("vendor_id", vendor_id).eq("image_url", file_path).execute()
+            
+            # Simple fallback: if we can't find a direct link, but it's a vendor admin,
+            # we should be careful. A more robust way is to check the prefix if product_id is predictable.
+            # But searching the images array is most accurate.
+            
+            if not product_search.data:
+                # One last check: maybe the image_url in DB is the FULL URL, but file_path is just the key
+                # We'll trust the prefix check if the user is a super_admin, 
+                # but for vendor_admins we REQUIRE a match in the products table.
+                raise HTTPException(
+                    status_code=403, 
+                    detail="You do not have permission to delete this image (ownership unverified)"
+                )
+        except HTTPException:
+            raise
+        except Exception as exc:
+            print(f"Error verifying image ownership: {exc}")
+            raise HTTPException(status_code=500, detail="Failed to verify image ownership")
 
     try:
         storage = supabase.storage.from_(settings.SUPABASE_STORAGE_BUCKET)
@@ -118,9 +160,14 @@ def create_product(
             detail="Vendor admin must be assigned to a vendor to create products"
         )
     
+    # Generate a unique ID (UUID) to prevent user-controlled ID collisions
+    product_id = str(uuid4())
+    # Slug is for URL readability, not the primary key
     slug = "-".join(payload.name.lower().split())
+    
     product_data = {
-        "id": slug,
+        "id": product_id,
+        "slug": slug,  # Separate field for URL-friendly identifier
         "name": payload.name,
         "description": payload.description,
         "category": payload.category,
@@ -136,12 +183,16 @@ def create_product(
         "video_url": payload.video_url,
         "vendor_id": vendor_id,  # Assign to vendor
     }
-    response = (
-        supabase.table("products")
-        .upsert(product_data, on_conflict="id")
-        .execute()
-    )
-    return response.data[0] if response.data else None
+    
+    try:
+        # Use insert (not upsert) to ensure we're creating new records only
+        response = supabase.table("products").insert(product_data).execute()
+        return response.data[0] if response.data else None
+    except Exception as exc:
+        error_msg = str(exc).lower()
+        if "duplicate" in error_msg or "already exists" in error_msg:
+            raise HTTPException(status_code=400, detail="A product with this name already exists")
+        raise HTTPException(status_code=500, detail=f"Failed to create product: {str(exc)}")
 
 
 @router.put("/{product_id}", response_model=ProductOut)

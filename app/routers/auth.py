@@ -1,12 +1,40 @@
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, EmailStr, model_validator
 import json
+import time
+from collections import defaultdict
 from supabase import Client
 
 from ..supabase_client import get_supabase_client, get_supabase_anon_client
 from ..dependencies import get_current_user
 
 router = APIRouter(prefix="/auth", tags=["auth"])
+
+# Simple in-memory rate limiter storage
+_rate_limit_storage = defaultdict(list)
+
+def rate_limit(limit: int = 5, window: int = 60):
+    """
+    Very simple in-memory rate limiter.
+    Defaults to 5 requests per 60 seconds per IP.
+    """
+    def dependency(request: Request):
+        client_ip = request.client.host if request.client else "unknown"
+        now = time.time()
+        
+        # Remove old timestamps
+        _rate_limit_storage[client_ip] = [t for t in _rate_limit_storage[client_ip] if now - t < window]
+        
+        if len(_rate_limit_storage[client_ip]) >= limit:
+            raise HTTPException(
+                status_code=429, 
+                detail="Too many attempts. Please try again later."
+            )
+        
+        _rate_limit_storage[client_ip].append(now)
+        return True
+    
+    return dependency
 
 
 class AuthResponse(BaseModel):
@@ -71,7 +99,7 @@ class ProfileUpdatePayload(BaseModel):
         return v
 
 
-@router.post("/login", response_model=AuthResponse)
+@router.post("/login", response_model=AuthResponse, dependencies=[Depends(rate_limit(limit=10, window=60))])
 def login(payload: LoginPayload, supabase: Client = Depends(get_supabase_anon_client)):
     try:
         res = supabase.auth.sign_in_with_password(
@@ -104,7 +132,7 @@ def login(payload: LoginPayload, supabase: Client = Depends(get_supabase_anon_cl
         raise HTTPException(status_code=401, detail=str(e))
 
 
-@router.post("/signup", response_model=AuthResponse)
+@router.post("/signup", response_model=AuthResponse, dependencies=[Depends(rate_limit(limit=5, window=300))])
 def signup(payload: SignupPayload, supabase: Client = Depends(get_supabase_anon_client)):
     try:
         res = supabase.auth.sign_up(
@@ -212,10 +240,11 @@ def get_google_auth_url(supabase: Client = Depends(get_supabase_anon_client)):
     Returns the Google OAuth URL for signing in.
     Redirects back to the frontend application after successful login.
     """
+    from ..config import get_settings
+    settings = get_settings()
+    
     try:
-        # Construct the redirect URL to the frontend (adjust port/domain as needed)
-        # In production this should be your production URL
-        redirect_to = "https://lumina-ladies.vercel.app/auth/callback" 
+        redirect_to = settings.OAUTH_REDIRECT_URL
         
         res = supabase.auth.get_url_for_provider(
             provider="google",

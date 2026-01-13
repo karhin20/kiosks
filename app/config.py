@@ -12,10 +12,11 @@ class Settings(BaseSettings):
     SUPABASE_ANON_KEY: str | None = None
     SUPABASE_STORAGE_BUCKET: str = "product-images"
     MESSENGER_URL: str = "http://localhost:4000/notify"
-    MESSENGER_SECRET: str = "lumi_secret_123"
+    MESSENGER_SECRET: str = "PLACEHOLDER_SECRET_CHANGE_ME" # Set this in your .env file
     API_PREFIX: str = "/api"
     APP_NAME: str = "Lampo API"
-    ALLOWED_ORIGINS: list[str] = ["*"]
+    ALLOWED_ORIGINS: list[str] = ["http://localhost:8080"]  # Safe defaults, override in .env for production
+    OAUTH_REDIRECT_URL: str = "http://localhost:8080/auth/callback"  # Override in .env for production
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
