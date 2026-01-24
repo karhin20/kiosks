@@ -24,6 +24,7 @@ def create_app() -> FastAPI:
     app.include_router(vendors.router, prefix=settings.API_PREFIX)
     app.include_router(reviews.router, prefix=settings.API_PREFIX)
     app.include_router(subscriptions.router, prefix=settings.API_PREFIX)
+    app.include_router(audit.router, prefix=settings.API_PREFIX)
 
     @app.get("/health")
     def health():

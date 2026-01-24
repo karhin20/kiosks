@@ -11,6 +11,7 @@ from ..dependencies import (
     get_vendor_for_user,
 )
 from ..supabase_client import get_supabase_client
+from ..utils.logging import log_action
 from ..config import get_settings
 
 router = APIRouter(prefix="/products", tags=["products"])
@@ -30,10 +31,23 @@ def list_products(
     vendor_id: str | None = Query(None, description="Filter products by vendor ID"),
     limit: int = Query(50, ge=1, le=100, description="Max number of products to return"),
     offset: int = Query(0, ge=0, description="Number of products to skip"),
+    status: str | None = Query(None, description="Filter by status (Admin/Vendor only)"),
     supabase: Client = Depends(get_supabase_client),
+    user=Depends(get_current_user),
 ):
-    """List all products with pagination. Optionally filter by vendor_id."""
+    """List all products with pagination. Optionally filter by vendor_id and status."""
     query = supabase.table("products").select("*, vendors(name, slug)").order("created_at", desc=True)
+    
+    # Permission check for status filtering
+    is_admin = user.get("role") in ["admin", "super_admin"]
+    is_vendor = user.get("role") == "vendor_admin"
+    
+    if not is_admin and not is_vendor:
+        # Public users only see published products
+        query = query.eq("status", "published")
+    elif status:
+        # Admins/Vendors can filter by status
+        query = query.eq("status", status)
     
     if vendor_id:
         query = query.eq("vendor_id", vendor_id)
@@ -49,14 +63,14 @@ def list_products(
 @router.get("/flash-sales")
 def get_flash_sales(supabase: Client = Depends(get_supabase_client)):
     """Get products marked as flash sale items"""
-    response = supabase.table("products").select("*, vendors(name, slug)").eq("is_flash_sale", True).order("created_at", desc=True).execute()
+    response = supabase.table("products").select("*, vendors(name, slug)").eq("is_flash_sale", True).eq("status", "published").order("created_at", desc=True).execute()
     return _flatten_vendor_data(response.data or [])
 
 
 @router.get("/best-selling")
 def get_best_selling(supabase: Client = Depends(get_supabase_client)):
     """Get best selling products sorted by sales count"""
-    response = supabase.table("products").select("*, vendors(name, slug)").order("sales_count", desc=True).limit(8).execute()
+    response = supabase.table("products").select("*, vendors(name, slug)").eq("status", "published").order("sales_count", desc=True).limit(8).execute()
     return _flatten_vendor_data(response.data or [])
 
 
@@ -191,11 +205,21 @@ def create_product(
         product_data["is_flash_sale"] = False
         product_data["flash_sale_end_time"] = None
         product_data["is_featured"] = False
+        product_data["status"] = "pending"  # Always pending for vendors on creation
+    elif user.get("role") in ["admin", "super_admin"]:
+        # Admins can set status on creation if they want, otherwise default from payload
+        product_data["status"] = payload.status if hasattr(payload, 'status') else "published"
+
     
     try:
         # Use insert (not upsert) to ensure we're creating new records only
         response = supabase.table("products").insert(product_data).execute()
-        return response.data[0] if response.data else None
+        new_prod = response.data[0] if response.data else None
+        
+        if new_prod:
+            log_action(supabase, user, "create_product", "product", new_prod["id"], {"name": new_prod["name"]})
+            
+        return new_prod
     except Exception as exc:
         error_msg = str(exc).lower()
         if "duplicate" in error_msg or "already exists" in error_msg:
@@ -221,12 +245,32 @@ def update_product(
     if user.get("role") == "vendor_admin":
         if product_response.data.get("vendor_id") != vendor_id:
             raise HTTPException(status_code=403, detail="You can only update products from your vendor")
-    
+    # Filter out restricted fields for vendor_admin
+    update_data = payload.model_dump(exclude_none=True)
+    if user.get("role") == "vendor_admin":
+        # Remove these keys if they exist in the payload
+        update_data.pop("is_flash_sale", None)
+        update_data.pop("flash_sale_end_time", None)
+        update_data.pop("is_featured", None)
+        # Any edit by a vendor resets status to pending
+        update_data["status"] = "pending"
+    elif user.get("role") in ["admin", "super_admin"]:
+        # Admins can update status directly
+        pass
+
+    response = (
+        supabase.table("products")
+        .update(update_data)
+        .eq("id", product_id)
         .execute()
     )
     if not response.data:
         raise HTTPException(status_code=404, detail="Product not found")
-    return response.data[0]
+        
+    updated_prod = response.data[0]
+    log_action(supabase, user, "update_product", "product", product_id, update_data)
+    
+    return updated_prod
 
 
 @router.delete("/{product_id}")
@@ -248,7 +292,31 @@ def delete_product(
             raise HTTPException(status_code=403, detail="You can only delete products from your vendor")
     
     supabase.table("products").delete().eq("id", product_id).execute()
+    log_action(supabase, user, "delete_product", "product", product_id)
     return {"status": "deleted", "id": product_id}
+
+
+@router.patch("/{product_id}/status", response_model=ProductOut)
+def update_product_status(
+    product_id: str,
+    status: str = Query(..., description="New status (published, rejected, pending, draft)"),
+    supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_admin), # Only Super Admin can moderate
+):
+    """Update a product status (Approve/Reject). Super Admin only."""
+    response = (
+        supabase.table("products")
+        .update({"status": status})
+        .eq("id", product_id)
+        .select("*")
+        .single()
+        .execute()
+    )
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+        
+    log_action(supabase, user, f"set_status_{status}", "product", product_id)
+    return response.data
 
 
 @router.post("/{product_id}/image")

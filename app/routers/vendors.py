@@ -10,6 +10,7 @@ from ..dependencies import (
     require_vendor_ownership,
 )
 from ..supabase_client import get_supabase_client
+from ..utils.logging import log_action
 
 router = APIRouter(prefix="/vendors", tags=["vendors"])
 
@@ -102,11 +103,11 @@ def get_vendor_products(
     )
     return response.data or []
 
-
-@router.post("", response_model=VendorOut, dependencies=[Depends(require_super_admin)])
+@router.post("", response_model=VendorOut)
 def create_vendor(
     payload: VendorCreate,
     supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_super_admin)
 ):
     """Create a new vendor. Only super admins can create vendors."""
     vendor_data = payload.model_dump()
@@ -116,7 +117,10 @@ def create_vendor(
     if not response.data:
         raise HTTPException(status_code=500, detail="Failed to create vendor")
     
-    return response.data[0]
+    new_vendor = response.data[0]
+    log_action(supabase, user, "create_vendor", "vendor", new_vendor["id"], {"name": new_vendor["name"]})
+    
+    return new_vendor
 
 
 @router.put("/{vendor_id}", response_model=VendorOut)
@@ -142,14 +146,18 @@ def update_vendor(
         .execute()
     )
     
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Vendor not found")
+    updated_vendor = response.data[0]
+    log_action(supabase, user, "update_vendor", "vendor", vendor_id, update_data)
     
-    return response.data[0]
+    return updated_vendor
 
 
-@router.delete("/{vendor_id}", dependencies=[Depends(require_super_admin)])
-def delete_vendor(vendor_id: str, supabase: Client = Depends(get_supabase_client)):
+@router.delete("/{vendor_id}")
+def delete_vendor(
+    vendor_id: str, 
+    supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_super_admin)
+):
     """
     Deactivate a vendor (soft delete). Only super admins can deactivate vendors.
     This sets is_active to false rather than deleting the record.
@@ -164,14 +172,16 @@ def delete_vendor(vendor_id: str, supabase: Client = Depends(get_supabase_client
     if not response.data:
         raise HTTPException(status_code=404, detail="Vendor not found")
     
+    log_action(supabase, user, "deactivate_vendor", "vendor", vendor_id)
     return {"status": "deactivated", "id": vendor_id}
 
 
-@router.post("/{vendor_id}/admins", dependencies=[Depends(require_super_admin)])
+@router.post("/{vendor_id}/admins")
 def assign_vendor_admin(
     vendor_id: str,
     user_id: str = Query(..., description="User ID to assign as vendor admin"),
     supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_super_admin)
 ):
     """
     Assign a user as admin for a vendor. Only super admins can assign vendor admins.
@@ -198,6 +208,7 @@ def assign_vendor_admin(
             "user_id": user_id,
         }).execute()
         
+        log_action(supabase, user, "assign_vendor_admin", "vendor", vendor_id, {"target_user_id": user_id})
         return {"status": "assigned", "vendor_id": vendor_id, "user_id": user_id}
     except Exception as exc:
         # Check if already assigned
@@ -206,11 +217,12 @@ def assign_vendor_admin(
         raise HTTPException(status_code=500, detail="Failed to assign vendor admin") from exc
 
 
-@router.delete("/{vendor_id}/admins/{user_id}", dependencies=[Depends(require_super_admin)])
+@router.delete("/{vendor_id}/admins/{user_id}")
 def remove_vendor_admin(
     vendor_id: str,
     user_id: str,
     supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_super_admin)
 ):
     """Remove a user from being admin of a vendor. Only super admins can remove vendor admins."""
     response = (
@@ -221,6 +233,7 @@ def remove_vendor_admin(
         .execute()
     )
     
+    log_action(supabase, user, "remove_vendor_admin", "vendor", vendor_id, {"target_user_id": user_id})
     return {"status": "removed", "vendor_id": vendor_id, "user_id": user_id}
 
 

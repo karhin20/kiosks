@@ -143,22 +143,74 @@ def create_order(
         ) from exc
 
 
-@router.get("/admin/all", response_model=list[OrderOut], dependencies=[Depends(require_admin)])
+@router.get("/admin/all", response_model=list[OrderOut])
 def list_all_orders(
     limit: int = Query(50, ge=1, le=200, description="Max orders to return"),
     offset: int = Query(0, ge=0, description="Orders to skip"),
     supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_vendor_admin),
+    vendor_id: str | None = Depends(get_vendor_for_user),
 ):
+    """
+    List all orders. 
+    Super admins see everything. 
+    Vendor admins see orders containing their products, with other vendors' items stripped.
+    """
+    if user.get("role") in ["admin", "super_admin"]:
+        response = supabase.table("orders").select("*").order("created_at", desc=True).range(offset, offset + limit - 1).execute()
+        return response.data or []
+    
+    # Vendor Admin Logic
+    # 1. First, we need to find orders that contain products belonging to this vendor.
+    # Since items are in JSONB, we'll fetch a wider range and filter in Python for now, 
+    # as Supabase JSONB filtering for 'any item in list has vendor_id=X' is tricky with current schema.
+    # Better: Query products for this vendor first.
+    vend_prods_res = supabase.table("products").select("id").eq("vendor_id", vendor_id).execute()
+    vend_prod_ids = {p["id"] for p in vend_prods_res.data}
+    
+    # Fetch recent orders
     response = supabase.table("orders").select("*").order("created_at", desc=True).range(offset, offset + limit - 1).execute()
-    return response.data or []
+    all_orders = response.data or []
+    
+    filtered_orders = []
+    for order in all_orders:
+        vendor_items = [item for item in order["items"] if item.get("product_id") in vend_prod_ids]
+        if vendor_items:
+            # Strip competitor items and adjust total for vendor view
+            # Note: We create a copy to avoid modifying original if cached
+            vendor_order = dict(order)
+            vendor_order["items"] = vendor_items
+            vendor_order["total"] = sum(item["price"] * item["quantity"] for item in vendor_items)
+            filtered_orders.append(vendor_order)
+            
+    return filtered_orders
 
 
-@router.patch("/admin/{order_id}/status", response_model=OrderOut, dependencies=[Depends(require_admin)])
+from ..utils.logging import log_action
+
+@router.patch("/admin/{order_id}/status", response_model=OrderOut)
 def update_order_status(
     order_id: str,
     payload: OrderStatusUpdate,
     supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_vendor_admin),
+    vendor_id: str | None = Depends(get_vendor_for_user),
 ):
+    """Update a product status. Vendor admins can only update if it's their vendor's product exclusively (simplified)."""
+    # Verify access
+    order_res = supabase.table("orders").select("*").eq("id", order_id).single().execute()
+    if not order_res.data:
+        raise HTTPException(status_code=404, detail="Order not found")
+    
+    if user.get("role") == "vendor_admin":
+        # Check if they own ANY item in the order
+        vend_prods_res = supabase.table("products").select("id").eq("vendor_id", vendor_id).execute()
+        vend_prod_ids = {p["id"] for p in vend_prods_res.data}
+        has_ownership = any(item.get("product_id") in vend_prod_ids for item in order_res.data["items"])
+        
+        if not has_ownership:
+            raise HTTPException(status_code=403, detail="You do not have access to this order")
+
     response = (
         supabase.table("orders")
         .update({"status": payload.status})
@@ -167,8 +219,9 @@ def update_order_status(
         .single()
         .execute()
     )
-    if not response.data:
-        raise HTTPException(status_code=404, detail="Order not found")
+    
+    log_action(supabase, user, "update_order_status", "order", order_id, {"new_status": payload.status})
+    
     return response.data
 
 

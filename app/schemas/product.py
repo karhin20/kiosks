@@ -17,6 +17,7 @@ class ProductBase(BaseModel):
     is_featured: bool = False
     flash_sale_end_time: Optional[datetime] = None
     video_url: Optional[str] = None
+    status: str = "pending"
 
 
 class ProductCreate(ProductBase):
@@ -38,6 +39,7 @@ class ProductUpdate(BaseModel):
     is_featured: Optional[bool] = None
     flash_sale_end_time: Optional[datetime] = None
     video_url: Optional[str] = None
+    status: Optional[str] = None
 
 
 class ProductOut(ProductBase):
