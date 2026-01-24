@@ -3,7 +3,7 @@ import httpx
 from supabase import Client
 
 from ..schemas.order import OrderCreate, OrderOut, OrderStatusUpdate
-from ..dependencies import get_current_user, require_admin
+from ..dependencies import get_current_user, require_admin, require_vendor_admin, get_vendor_for_user
 from ..supabase_client import get_supabase_client
 from ..config import get_settings
 

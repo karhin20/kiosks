@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .config import get_settings
-from .routers import products, orders, admin, auth, vendors, reviews, subscriptions
+from .routers import products, orders, admin, auth, vendors, reviews, subscriptions, audit
 
 
 def create_app() -> FastAPI:
