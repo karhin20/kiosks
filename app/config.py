@@ -15,7 +15,11 @@ class Settings(BaseSettings):
     MESSENGER_SECRET: str = "PLACEHOLDER_SECRET_CHANGE_ME" # Set this in your .env file
     API_PREFIX: str = "/api"
     APP_NAME: str = "Lampo API"
-    ALLOWED_ORIGINS: list[str] = ["http://localhost:8080"]  # Safe defaults, override in .env for production
+    ALLOWED_ORIGINS: list[str] = [
+        "http://localhost:8080", 
+        "https://www.kelsmall.com", 
+        "https://kelsmall.com"
+    ]  # Safe defaults, override in .env for production
     OAUTH_REDIRECT_URL: str = "http://localhost:8080/auth/callback"  # Override in .env for production
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
@@ -28,11 +32,12 @@ def get_settings() -> Settings:
     if isinstance(settings.ALLOWED_ORIGINS, str):
         import json
         raw = settings.ALLOWED_ORIGINS.strip()
-        if raw.startswith("[") and raw.endsWith("]"):
+        if raw.startswith("[") and raw.endswith("]"):
             try:
                 settings.ALLOWED_ORIGINS = json.loads(raw)
             except Exception:
-                settings.ALLOWED_ORIGINS = [s.strip() for s in raw[1:-1].split(",") if s.strip()]
+                # Fallback to comma separation inside brackets
+                settings.ALLOWED_ORIGINS = [s.strip().strip('"').strip("'") for s in raw[1:-1].split(",") if s.strip()]
         else:
             settings.ALLOWED_ORIGINS = [s.strip() for s in raw.split(",") if s.strip()]
     
