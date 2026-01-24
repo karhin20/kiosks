@@ -293,3 +293,29 @@ def refresh_token(payload: RefreshTokenPayload, supabase: Client = Depends(get_s
     except Exception as e:
         raise HTTPException(status_code=401, detail=str(e))
 
+
+@router.delete("/me", status_code=204)
+def delete_account(
+    user=Depends(get_current_user),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """
+    Permanently delete the current user's account.
+    """
+    user_id = user["id"]
+    
+    try:
+        # Delete from auth.users (requires service role key)
+        # We use supabase.auth.admin.delete_user(user_id) 
+        # Note: Depending on the library version, it might be supabase.auth.admin.delete_user
+        
+        # The supabase-py client (gotrue) exposes admin interface
+        res = supabase.auth.admin.delete_user(user_id)
+        
+        # Optionally, we could manually delete from public.users if CASCADE isn't set up
+        # supabase.table("users").delete().eq("id", user_id).execute()
+        
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to delete account: {str(e)}")
+
+    return None
