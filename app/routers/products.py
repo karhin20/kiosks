@@ -182,8 +182,15 @@ def create_product(
         "sales_count": payload.sales_count if hasattr(payload, 'sales_count') else 0,
         "is_featured": payload.is_featured if hasattr(payload, 'is_featured') else False,
         "video_url": payload.video_url,
+        "video_url": payload.video_url,
         "vendor_id": vendor_id,  # Assign to vendor
     }
+
+    # Restrict permissions: Vendor admins cannot set flash_sale or is_featured
+    if user.get("role") == "vendor_admin":
+        product_data["is_flash_sale"] = False
+        product_data["flash_sale_end_time"] = None
+        product_data["is_featured"] = False
     
     try:
         # Use insert (not upsert) to ensure we're creating new records only
@@ -215,10 +222,6 @@ def update_product(
         if product_response.data.get("vendor_id") != vendor_id:
             raise HTTPException(status_code=403, detail="You can only update products from your vendor")
     
-    response = (
-        supabase.table("products")
-        .update(payload.model_dump(exclude_none=True))
-        .eq("id", product_id)
         .execute()
     )
     if not response.data:
