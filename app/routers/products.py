@@ -178,6 +178,7 @@ def create_product(
         "images": payload.images,
         "image_url": payload.image_url or (payload.images[0] if payload.images else None),
         "is_flash_sale": payload.is_flash_sale if hasattr(payload, 'is_flash_sale') else False,
+        "flash_sale_end_time": payload.flash_sale_end_time.isoformat() if payload.flash_sale_end_time else None,
         "sales_count": payload.sales_count if hasattr(payload, 'sales_count') else 0,
         "is_featured": payload.is_featured if hasattr(payload, 'is_featured') else False,
         "video_url": payload.video_url,
