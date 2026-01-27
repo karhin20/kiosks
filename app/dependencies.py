@@ -57,6 +57,54 @@ def get_current_user(
     }
 
 
+def get_current_user_optional(
+    credentials: HTTPAuthorizationCredentials | None = Security(security),
+    supabase: Client = Depends(get_supabase_client),
+):
+    """
+    Returns the user object if authenticated, otherwise returns None.
+    Does NOT raise 401.
+    """
+    if credentials is None:
+        return None
+
+    token = credentials.credentials
+    try:
+        # Use anon key to verify the user token
+        auth_client = supabase.auth
+        user_response = auth_client.get_user(token)
+    except Exception:
+        return None
+
+    if not user_response or not user_response.user:
+        return None
+
+    supa_user = user_response.user
+    
+    # Fetch public profile data
+    profile_data = {}
+    favorites = []
+    
+    try:
+        profile_res = supabase.table("users").select("*").eq("id", supa_user.id).single().execute()
+        if profile_res.data:
+            profile_data = profile_res.data
+            favorites = profile_data.get("favorites", []) or []
+    except Exception:
+        pass
+
+    return {
+        "id": supa_user.id,
+        "email": supa_user.email,
+        "phone": profile_data.get("phone") or supa_user.phone,
+        "name": profile_data.get("full_name") or (supa_user.user_metadata or {}).get("name") or "",
+        "role": profile_data.get("user_type", "customer"),
+        "favorites": favorites,
+        "created_at": profile_data.get("created_at") or supa_user.created_at,
+        "address": profile_data.get("address"),
+    }
+
+
 def require_admin(user=Depends(get_current_user)):
     """Requires user to be super_admin (legacy admin role)"""
     if user.get("role") not in ["admin", "super_admin"]:

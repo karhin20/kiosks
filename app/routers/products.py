@@ -6,6 +6,7 @@ from supabase import Client
 from ..schemas.product import ProductCreate, ProductOut, ProductUpdate
 from ..dependencies import (
     get_current_user,
+    get_current_user_optional,
     require_admin,
     require_vendor_admin,
     get_vendor_for_user,
@@ -33,14 +34,18 @@ def list_products(
     offset: int = Query(0, ge=0, description="Number of products to skip"),
     status: str | None = Query(None, description="Filter by status (Admin/Vendor only)"),
     supabase: Client = Depends(get_supabase_client),
-    user=Depends(get_current_user),
+    user=Depends(get_current_user_optional),
 ):
     """List all products with pagination. Optionally filter by vendor_id and status."""
     query = supabase.table("products").select("*, vendors(name, slug)").order("created_at", desc=True)
     
     # Permission check for status filtering
-    is_admin = user.get("role") in ["admin", "super_admin"]
-    is_vendor = user.get("role") == "vendor_admin"
+    is_admin = False
+    is_vendor = False
+    
+    if user:
+        is_admin = user.get("role") in ["admin", "super_admin"]
+        is_vendor = user.get("role") == "vendor_admin"
     
     if not is_admin and not is_vendor:
         # Public users only see published products
