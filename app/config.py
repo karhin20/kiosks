@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         "https://www.kelsmall.com", 
         "https://kelsmall.com"
     ]  # Safe defaults, override in .env for production
-    OAUTH_REDIRECT_URL: str = "http://localhost:8080/auth/callback"  # Override in .env for production
+    OAUTH_REDIRECT_URL: str = "https://ipuuwyrkxygurapijhyl.supabase.co/auth/v1/callback"  # Override in .env for production
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 

@@ -47,14 +47,30 @@ def list_products(
         is_admin = user.get("role") in ["admin", "super_admin"]
         is_vendor = user.get("role") == "vendor_admin"
     
+    if is_vendor:
+        # Enforce vendor isolation: Get user's vendor ID
+        try:
+            vendor_res = supabase.table("vendors").select("id").eq("user_id", user["id"]).single().execute()
+            if vendor_res.data:
+                # Force filter to their vendor_id, ignoring any passed param (or ensuring it matches)
+                query = query.eq("vendor_id", vendor_res.data["id"])
+            else:
+                # User is vendor_admin but has no vendor? Return empty.
+                return []
+        except Exception:
+            return []
+
     if not is_admin and not is_vendor:
         # Public users only see published products
         query = query.eq("status", "published")
+        if vendor_id:
+            query = query.eq("vendor_id", vendor_id)
     elif status:
         # Admins/Vendors can filter by status
         query = query.eq("status", status)
     
-    if vendor_id:
+    # If admin (and filter didn't force vendor), allow optional vendor_id filter
+    if is_admin and vendor_id:
         query = query.eq("vendor_id", vendor_id)
     
     # Apply pagination
