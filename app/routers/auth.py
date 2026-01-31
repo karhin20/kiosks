@@ -265,6 +265,48 @@ def get_google_auth_url(supabase: Client = Depends(get_supabase_anon_client)):
         raise HTTPException(status_code=400, detail=error_detail)
 
 
+class OAuthCodeExchange(BaseModel):
+    code: str
+
+
+@router.post("/google-callback", response_model=AuthResponse)
+def exchange_google_code(payload: OAuthCodeExchange, supabase: Client = Depends(get_supabase_anon_client)):
+    """
+    Exchanges the OAuth authorization code for access and refresh tokens.
+    This handles the PKCE flow where Supabase returns a code instead of tokens directly.
+    """
+    try:
+        # Exchange the code for a session
+        res = supabase.auth.exchange_code_for_session(payload.code)
+        
+        if not res.session or not res.user:
+            raise HTTPException(status_code=401, detail="Invalid authorization code")
+        
+        # Fetch detailed profile from users table
+        user_data = res.user.model_dump()
+        try:
+            profile_res = supabase.table("users").select("*").eq("id", res.user.id).single().execute()
+            if profile_res.data:
+                profile = profile_res.data
+                user_data["role"] = profile.get("user_type", "customer")
+                user_data["name"] = profile.get("full_name") or user_data.get("user_metadata", {}).get("name")
+                user_data["phone"] = profile.get("phone") or user_data.get("phone")
+                user_data["favorites"] = profile.get("favorites", [])
+                user_data["address"] = profile.get("address")
+        except Exception:
+            # Fallback to defaults if profile fetch fails
+            pass
+        
+        return {
+            "access_token": res.session.access_token,
+            "user": user_data,
+        }
+    except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        raise HTTPException(status_code=400, detail=error_detail)
+
+
 class RefreshTokenPayload(BaseModel):
     refresh_token: str
 
