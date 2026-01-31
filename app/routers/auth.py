@@ -244,7 +244,9 @@ def get_google_auth_url(supabase: Client = Depends(get_supabase_anon_client)):
     settings = get_settings()
     
     try:
-        redirect_to = settings.OAUTH_REDIRECT_URL
+        # Use implicit flow by requesting tokens directly in the redirect
+        # This is done by setting flow_type to 'implicit' if supported, or by using redirect patterns
+        redirect_to = f"{settings.OAUTH_REDIRECT_URL}/auth/callback"
         
         # The sign_in_with_oauth method returns an object with a 'url' property
         res = supabase.auth.sign_in_with_oauth({
@@ -259,6 +261,47 @@ def get_google_auth_url(supabase: Client = Depends(get_supabase_anon_client)):
         auth_url = res.url if hasattr(res, 'url') else str(res)
         
         return {"url": auth_url}
+    except Exception as e:
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        raise HTTPException(status_code=400, detail=error_detail)
+
+
+class GoogleCallbackPayload(BaseModel):
+    code: str
+
+
+@router.post("/google/callback", response_model=AuthResponse)
+def google_callback(payload: GoogleCallbackPayload, supabase: Client = Depends(get_supabase_anon_client)):
+    """
+    Handles the OAuth callback by exchanging the authorization code for tokens.
+    """
+    try:
+        # Exchange code for session using Supabase
+        res = supabase.auth.exchange_code_for_session(payload.code)
+        
+        if not res.session or not res.user:
+            raise HTTPException(status_code=401, detail="Failed to exchange code for session")
+        
+        # Fetch detailed profile from users table
+        user_data = res.user.model_dump()
+        try:
+            profile_res = supabase.table("users").select("*").eq("id", res.user.id).single().execute()
+            if profile_res.data:
+                profile = profile_res.data
+                user_data["role"] = profile.get("user_type", "customer")
+                user_data["name"] = profile.get("full_name") or user_data.get("user_metadata", {}).get("name")
+                user_data["phone"] = profile.get("phone") or user_data.get("phone")
+                user_data["favorites"] = profile.get("favorites", [])
+                user_data["address"] = profile.get("address")
+        except Exception:
+            # Profile might not exist yet for OAuth users, that's ok
+            pass
+        
+        return {
+            "access_token": res.session.access_token,
+            "user": user_data,
+        }
     except Exception as e:
         import traceback
         error_detail = f"{str(e)}\n{traceback.format_exc()}"

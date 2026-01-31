@@ -20,7 +20,7 @@ class Settings(BaseSettings):
         "https://www.kelsmall.com", 
         "https://kelsmall.com"
     ]  # Safe defaults, override in .env for production
-    OAUTH_REDIRECT_URL: str = "https://kelsmall.com"  # Override in .env for production
+    OAUTH_REDIRECT_URL: str = "https://kelsmall.com/auth/callback"  # Override in .env for production
 
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
