@@ -277,7 +277,7 @@ def exchange_google_code(payload: OAuthCodeExchange, supabase: Client = Depends(
     """
     try:
         # Exchange the code for a session
-        res = supabase.auth.exchange_code_for_session(payload.code)
+        res = supabase.auth.exchange_code_for_session({"auth_code": payload.code})
         
         if not res.session or not res.user:
             raise HTTPException(status_code=401, detail="Invalid authorization code")
