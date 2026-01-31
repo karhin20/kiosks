@@ -246,14 +246,23 @@ def get_google_auth_url(supabase: Client = Depends(get_supabase_anon_client)):
     try:
         redirect_to = settings.OAUTH_REDIRECT_URL
         
-        res = supabase.auth.get_url_for_provider(
-            provider="google",
-            redirect_to=redirect_to,
-            scopes=["email", "profile"]
-        )
-        return {"url": res}
+        # The sign_in_with_oauth method returns an object with a 'url' property
+        res = supabase.auth.sign_in_with_oauth({
+            "provider": "google",
+            "options": {
+                "redirect_to": redirect_to,
+                "scopes": "email profile"
+            }
+        })
+        
+        # Extract the URL from the response
+        auth_url = res.url if hasattr(res, 'url') else str(res)
+        
+        return {"url": auth_url}
     except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        import traceback
+        error_detail = f"{str(e)}\n{traceback.format_exc()}"
+        raise HTTPException(status_code=400, detail=error_detail)
 
 
 class RefreshTokenPayload(BaseModel):
