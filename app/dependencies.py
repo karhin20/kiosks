@@ -74,9 +74,7 @@ def get_current_user_optional(
         auth_client = supabase.auth
         user_response = auth_client.get_user(token)
     except Exception as exc:
-        # If a token was provided but is invalid, we SHOULD raise 401 
-        # so the frontend knows to refresh or logout, instead of silently failing to Guest.
-        print(f"[AUTH_OPTIONAL] Token validation failed: {exc}")
+        # Token was provided but is invalid — raise 401 so frontend can refresh
         raise HTTPException(status_code=401, detail="Session expired or invalid token")
 
     if not user_response or not user_response.user:

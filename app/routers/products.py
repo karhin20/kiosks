@@ -78,13 +78,6 @@ def list_products(
     
     response = query.execute()
     data = response.data or []
-    
-    # Debug logging
-    print(f"[LIST_PRODUCTS] User: {user.get('id') if user else 'Guest'}, Role: {user.get('role') if user else 'None'}, Items returned: {len(data)}")
-    if user and user.get("role") in ["admin", "super_admin"]:
-        pending_count = len([p for p in data if p.get("status") == "pending"])
-        print(f"[LIST_PRODUCTS] Admin detected. Total in response: {len(data)}, Pending in response: {pending_count}")
-    
     return _flatten_vendor_data(data)
 
 
@@ -312,7 +305,6 @@ def update_product(
         raise HTTPException(status_code=404, detail="Product not found")
     
     existing_product = product_response.data
-    print(f"[UPDATE_PRODUCT] Starting update for product {product_id} (name: {existing_product.get('name')}) by user {user.get('id')} (role: {user.get('role')})")
     
     # Check vendor ownership for vendor_admins
     if user.get("role") == "vendor_admin":
@@ -332,7 +324,6 @@ def update_product(
         # Admins can update status directly
         pass
 
-    print(f"[UPDATE_PRODUCT] Update data keys: {list(update_data.keys())} for product {product_id}")
 
     try:
         response = (
@@ -342,26 +333,50 @@ def update_product(
             .execute()
         )
     except Exception as exc:
-        print(f"[UPDATE_PRODUCT] ERROR during update for product {product_id}: {exc}")
         raise HTTPException(status_code=500, detail=f"Failed to update product: {str(exc)}")
 
     if not response.data:
-        print(f"[UPDATE_PRODUCT] WARNING: Update returned no data for product {product_id}")
         raise HTTPException(status_code=404, detail="Product not found after update")
         
     updated_prod = response.data[0]
-    
-    # Post-update verification: confirm the product still exists
-    verify = supabase.table("products").select("id").eq("id", product_id).execute()
-    if not verify.data:
-        print(f"[UPDATE_PRODUCT] CRITICAL: Product {product_id} disappeared after update! Update data was: {update_data}")
-    else:
-        print(f"[UPDATE_PRODUCT] Verified product {product_id} still exists after update")
-    
     log_action(supabase, user, "update_product", "product", product_id, update_data)
     
     return updated_prod
 
+
+@router.patch("/{product_id}/status")
+def update_product_status(
+    product_id: str,
+    status: str = Query(..., description="New status: published, pending, rejected, draft"),
+    supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_admin),
+):
+    """Update product status. Admin/Super Admin only (approve/reject workflow)."""
+    valid_statuses = ["published", "pending", "rejected", "draft"]
+    if status not in valid_statuses:
+        raise HTTPException(status_code=400, detail=f"Invalid status. Must be one of: {valid_statuses}")
+
+    # Verify product exists
+    product_response = supabase.table("products").select("id, name").eq("id", product_id).single().execute()
+    if not product_response.data:
+        raise HTTPException(status_code=404, detail="Product not found")
+
+    try:
+        response = (
+            supabase.table("products")
+            .update({"status": status})
+            .eq("id", product_id)
+            .execute()
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update status: {str(exc)}")
+
+    if not response.data:
+        raise HTTPException(status_code=404, detail="Product not found after status update")
+
+    log_action(supabase, user, "update_product_status", "product", product_id, {"status": status, "name": product_response.data.get("name")})
+    
+    return response.data[0]
 
 @router.delete("/{product_id}")
 def delete_product(
