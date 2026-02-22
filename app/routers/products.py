@@ -287,7 +287,6 @@ def update_product(
             supabase.table("products")
             .update(update_data)
             .eq("id", product_id)
-            .select("*")
             .execute()
         )
     except Exception as exc:
