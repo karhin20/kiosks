@@ -21,7 +21,7 @@ class ProductBase(BaseModel):
 
 
 class ProductCreate(ProductBase):
-    image_url: Optional[HttpUrl | str] = None
+    pass
 
 
 class ProductUpdate(BaseModel):
@@ -32,7 +32,6 @@ class ProductUpdate(BaseModel):
     original_price: Optional[float] = Field(None, ge=0)
     is_new: Optional[bool] = None
     details: Optional[list[str]] = None
-    image_url: Optional[HttpUrl | str] = None
     images: Optional[list[str]] = None
     is_flash_sale: Optional[bool] = None
     sales_count: Optional[int] = Field(None, ge=0)

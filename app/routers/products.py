@@ -211,12 +211,10 @@ def create_product(
         "is_new": payload.is_new,
         "details": payload.details,
         "images": payload.images,
-        "image_url": payload.image_url or (payload.images[0] if payload.images else None),
         "is_flash_sale": payload.is_flash_sale if hasattr(payload, 'is_flash_sale') else False,
         "flash_sale_end_time": payload.flash_sale_end_time.isoformat() if payload.flash_sale_end_time else None,
         "sales_count": payload.sales_count if hasattr(payload, 'sales_count') else 0,
         "is_featured": payload.is_featured if hasattr(payload, 'is_featured') else False,
-        "video_url": payload.video_url,
         "video_url": payload.video_url,
         "vendor_id": vendor_id,  # Assign to vendor
     }
@@ -257,15 +255,19 @@ def update_product(
     vendor_id: str | None = Depends(get_vendor_for_user),
 ):
     """Update a product. Vendor admins can only update their own vendor's products."""
-    # First, get the product to check vendor ownership
-    product_response = supabase.table("products").select("vendor_id").eq("id", product_id).single().execute()
+    # First, get the FULL product to check vendor ownership and preserve data
+    product_response = supabase.table("products").select("*").eq("id", product_id).single().execute()
     if not product_response.data:
         raise HTTPException(status_code=404, detail="Product not found")
     
+    existing_product = product_response.data
+    print(f"[UPDATE_PRODUCT] Starting update for product {product_id} (name: {existing_product.get('name')}) by user {user.get('id')} (role: {user.get('role')})")
+    
     # Check vendor ownership for vendor_admins
     if user.get("role") == "vendor_admin":
-        if product_response.data.get("vendor_id") != vendor_id:
+        if existing_product.get("vendor_id") != vendor_id:
             raise HTTPException(status_code=403, detail="You can only update products from your vendor")
+
     # Filter out restricted fields for vendor_admin
     update_data = payload.model_dump(exclude_none=True)
     if user.get("role") == "vendor_admin":
@@ -273,22 +275,38 @@ def update_product(
         update_data.pop("is_flash_sale", None)
         update_data.pop("flash_sale_end_time", None)
         update_data.pop("is_featured", None)
-        # Any edit by a vendor resets status to pending
-        update_data["status"] = "pending"
+        update_data.pop("status", None)  # Vendor admins cannot change status directly
     elif user.get("role") in ["admin", "super_admin"]:
         # Admins can update status directly
         pass
 
-    response = (
-        supabase.table("products")
-        .update(update_data)
-        .eq("id", product_id)
-        .execute()
-    )
+    print(f"[UPDATE_PRODUCT] Update data keys: {list(update_data.keys())} for product {product_id}")
+
+    try:
+        response = (
+            supabase.table("products")
+            .update(update_data)
+            .eq("id", product_id)
+            .select("*")
+            .execute()
+        )
+    except Exception as exc:
+        print(f"[UPDATE_PRODUCT] ERROR during update for product {product_id}: {exc}")
+        raise HTTPException(status_code=500, detail=f"Failed to update product: {str(exc)}")
+
     if not response.data:
-        raise HTTPException(status_code=404, detail="Product not found")
+        print(f"[UPDATE_PRODUCT] WARNING: Update returned no data for product {product_id}")
+        raise HTTPException(status_code=404, detail="Product not found after update")
         
     updated_prod = response.data[0]
+    
+    # Post-update verification: confirm the product still exists
+    verify = supabase.table("products").select("id").eq("id", product_id).execute()
+    if not verify.data:
+        print(f"[UPDATE_PRODUCT] CRITICAL: Product {product_id} disappeared after update! Update data was: {update_data}")
+    else:
+        print(f"[UPDATE_PRODUCT] Verified product {product_id} still exists after update")
+    
     log_action(supabase, user, "update_product", "product", product_id, update_data)
     
     return updated_prod
