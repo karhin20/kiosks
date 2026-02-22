@@ -78,6 +78,13 @@ def list_products(
     
     response = query.execute()
     data = response.data or []
+    
+    # Debug logging
+    print(f"[LIST_PRODUCTS] User: {user.get('id') if user else 'Guest'}, Role: {user.get('role') if user else 'None'}, Items returned: {len(data)}")
+    if user and user.get("role") in ["admin", "super_admin"]:
+        pending_count = len([p for p in data if p.get("status") == "pending"])
+        print(f"[LIST_PRODUCTS] Admin detected. Total in response: {len(data)}, Pending in response: {pending_count}")
+    
     return _flatten_vendor_data(data)
 
 
