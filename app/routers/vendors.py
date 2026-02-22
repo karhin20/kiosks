@@ -93,11 +93,12 @@ def get_vendor_products(
     
     vendor_id = vendor_response.data[0]["id"]
     
-    # Get products for this vendor
+    # Get published products for this vendor (public endpoint only shows published)
     response = (
         supabase.table("products")
         .select("*")
         .eq("vendor_id", vendor_id)
+        .eq("status", "published")
         .order("created_at", desc=True)
         .execute()
     )

@@ -50,10 +50,10 @@ def list_products(
     if is_vendor:
         # Enforce vendor isolation: Get user's vendor ID
         try:
-            vendor_res = supabase.table("vendors").select("id").eq("user_id", user["id"]).single().execute()
-            if vendor_res.data:
-                # Force filter to their vendor_id, ignoring any passed param (or ensuring it matches)
-                query = query.eq("vendor_id", vendor_res.data["id"])
+            vendor_admin_res = supabase.table("vendor_admins").select("vendor_id").eq("user_id", user["id"]).limit(1).execute()
+            if vendor_admin_res.data:
+                # Force filter to their vendor_id
+                query = query.eq("vendor_id", vendor_admin_res.data[0]["vendor_id"])
             else:
                 # User is vendor_admin but has no vendor? Return empty.
                 return []
@@ -99,14 +99,29 @@ def get_best_selling(supabase: Client = Depends(get_supabase_client)):
 def get_new_arrivals(supabase: Client = Depends(get_supabase_client)):
     """Get featured products or recent arrivals"""
     # First try to get featured products
-    response = supabase.table("products").select("*, vendors(name, slug)").eq("is_featured", True).order("created_at", desc=True).limit(4).execute()
+    response = (
+        supabase.table("products")
+        .select("*, vendors(name, slug)")
+        .eq("is_featured", True)
+        .eq("status", "published")
+        .order("created_at", desc=True)
+        .limit(4)
+        .execute()
+    )
     
     data = response.data or []
     if len(data) > 0:
         return _flatten_vendor_data(data)
 
     # Fallback to newest products
-    response = supabase.table("products").select("*, vendors(name, slug)").order("created_at", desc=True).limit(4).execute()
+    response = (
+        supabase.table("products")
+        .select("*, vendors(name, slug)")
+        .eq("status", "published")
+        .order("created_at", desc=True)
+        .limit(4)
+        .execute()
+    )
     return _flatten_vendor_data(response.data or [])
 
 
@@ -172,12 +187,41 @@ async def delete_storage_image(
         raise HTTPException(status_code=500, detail=f"Failed to delete image: {str(exc)}")
 
 
-@router.get("/{product_id}")
-def get_product(product_id: str, supabase: Client = Depends(get_supabase_client)):
+@router.get("/{product_id}", response_model=ProductOut)
+def get_product(
+    product_id: str, 
+    supabase: Client = Depends(get_supabase_client),
+    user=Depends(get_current_user_optional)
+):
+    """
+    Get a specific product by ID.
+    Public users can only see published products.
+    Admins and the owning vendor can see all statuses.
+    """
     response = supabase.table("products").select("*, vendors(name, slug)").eq("id", product_id).single().execute()
     if not response.data:
         raise HTTPException(status_code=404, detail="Product not found")
-    return _flatten_vendor_data([response.data])[0]
+    
+    product = response.data
+    
+    # Permission check for status
+    if product.get("status") != "published":
+        is_admin = user and user.get("role") in ["admin", "super_admin"]
+        is_owner = False
+        
+        if user and user.get("role") == "vendor_admin":
+            # Check if this user owns the vendor the product belongs to
+            try:
+                vendor_admin_res = supabase.table("vendor_admins").select("vendor_id").eq("user_id", user["id"]).eq("vendor_id", product.get("vendor_id")).execute()
+                if vendor_admin_res.data:
+                    is_owner = True
+            except Exception:
+                pass
+        
+        if not is_admin and not is_owner:
+            raise HTTPException(status_code=404, detail="Product not found or pending approval")
+            
+    return _flatten_vendor_data([product])[0]
 
 
 @router.post("", response_model=ProductOut)
@@ -275,7 +319,8 @@ def update_product(
         update_data.pop("is_flash_sale", None)
         update_data.pop("flash_sale_end_time", None)
         update_data.pop("is_featured", None)
-        update_data.pop("status", None)  # Vendor admins cannot change status directly
+        # Any edit by a vendor resets status to pending for admin approval
+        update_data["status"] = "pending"
     elif user.get("role") in ["admin", "super_admin"]:
         # Admins can update status directly
         pass
