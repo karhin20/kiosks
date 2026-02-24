@@ -465,4 +465,35 @@ async def upload_product_image(
     return {"image_url": public_url}
 
 
+@router.delete("/storage/image")
+def delete_product_image(
+    file_path: str = Query(..., description="The storage path of the file to delete (e.g., 'products/123-uuid.jpg')"),
+    supabase: Client = Depends(get_supabase_client),
+    user=Depends(require_vendor_admin),
+    vendor_id: str | None = Depends(get_vendor_for_user),
+):
+    """Delete an image from the storage bucket. Vendor admins can delete their own files."""
+    settings = get_settings()
+    
+    # We ideally should check if the file belongs to a product owned by the vendor here, 
+    # but since storage filepaths usually contain the product ID, we can extract it.
+    if user.get("role") == "vendor_admin":
+        try:
+            # Assumes file_path is something like "products/{product_id}-{uuid}.jpg"
+            filename = file_path.split("/")[-1]
+            prod_id = filename.split("-")[0]
+            
+            product_response = supabase.table("products").select("vendor_id").eq("id", prod_id).single().execute()
+            if not product_response.data or product_response.data.get("vendor_id") != vendor_id:
+                raise HTTPException(status_code=403, detail="You can only delete images for your vendor's products")
+        except Exception:
+            # If we can't parse the product ID or find it, deny deletion to be safe
+            raise HTTPException(status_code=403, detail="Unauthorized to delete this file")
 
+    storage = supabase.storage.from_(settings.SUPABASE_STORAGE_BUCKET)
+    
+    try:
+        res = storage.remove([file_path])
+        return {"status": "success", "data": res}
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to delete image: {str(exc)}")

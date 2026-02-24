@@ -40,6 +40,7 @@ def rate_limit(limit: int = 5, window: int = 60):
 class AuthResponse(BaseModel):
     access_token: str
     token_type: str = "bearer"
+    refresh_token: str | None = None
     user: dict
 
 
@@ -126,6 +127,7 @@ def login(payload: LoginPayload, supabase: Client = Depends(get_supabase_anon_cl
 
         return {
             "access_token": res.session.access_token,
+            "refresh_token": res.session.refresh_token,
             "user": user_data,
         }
     except Exception as e:
@@ -153,6 +155,7 @@ def signup(payload: SignupPayload, supabase: Client = Depends(get_supabase_anon_
 
         return {
             "access_token": res.session.access_token if res.session else "",
+            "refresh_token": res.session.refresh_token if res.session else None,
             "user": res.user.model_dump(),
         }
     except Exception as e:
@@ -299,6 +302,7 @@ def exchange_google_code(payload: OAuthCodeExchange, supabase: Client = Depends(
         
         return {
             "access_token": res.session.access_token,
+            "refresh_token": res.session.refresh_token,
             "user": user_data,
         }
     except Exception as e:
@@ -338,8 +342,8 @@ def refresh_token(payload: RefreshTokenPayload, supabase: Client = Depends(get_s
 
         return {
             "access_token": res.session.access_token,
+            "refresh_token": res.session.refresh_token,
             "user": user_data,
-            # We might want to return the new refresh token too if it rotates
         }
     except Exception as e:
         raise HTTPException(status_code=401, detail=str(e))
