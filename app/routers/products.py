@@ -324,6 +324,9 @@ def update_product(
         # Admins can update status directly
         pass
 
+    # Fix datetime serialization for Supabase
+    if "flash_sale_end_time" in update_data and update_data["flash_sale_end_time"] is not None:
+        update_data["flash_sale_end_time"] = update_data["flash_sale_end_time"].isoformat()
 
     try:
         response = (
